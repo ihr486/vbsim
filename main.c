@@ -43,9 +43,18 @@ static void print_params(const params_t *params)
     printf("    RK4 steps per PWM step (Ns) = %d\n", params->Ns);
 }
 
-static INT pid_control(const params_t *params, state_t state)
+typedef struct pid_state_tag
 {
-    INT ad = state.v * 
+    INT target;
+} pid_state_t;
+
+static INT pid_control(const params_t *params, pid_state_t *state, REAL v)
+{
+    INT raw = (v * 10E+3 / (47E+3 + 10E+3)) / 3.3 * 1024;
+
+    if (raw >= state->target) return 0;
+
+    return (state->target - raw);
 }
 
 #define DIODE_EPS (1E-6)
@@ -80,11 +89,16 @@ static void simulate(const params_t *params, FILE *of)
     s.v = params->E - params->Vf - params->Ic * params->Rs;
     s.i = s.v / params->Rp + params->Ic;
 
+    pid_state_t pid;
+
+    pid.target = 708;
+
     REAL T = 1.0 / (params->F * params->Ns);
-    INT D = 50;
+    INT D = 0;
 
     for (INT i0 = 0; i0 < params->N; i0++)
     {
+        REAL vs = s.v;
         INT i1;
         for (i1 = 0; i1 < D; i1++)
         {
@@ -95,6 +109,7 @@ static void simulate(const params_t *params, FILE *of)
             s = RK4(s, fabs(s.i) < DIODE_EPS ? Moff1 : Moff, T);
         }
         fprintf(of, "%lf %lf\n", i0 / params->F, s.v);
+        D = pid_control(params, &pid, vs);
     }
 }
 
@@ -105,6 +120,8 @@ int main(int argc, const char *argv[])
     params_t params = {
         5.0, 33E-6, 0.18, 47E-6, 10E+3, 0.4, 0.1E-3, 10E-3, 20E+3, 200, 1024
     };
+
+    params.Rp = ((47E+3 + 10E+3) * params.Rp) / (47E+3 + 10E+3 + params.Rp);
 
     print_params(&params);
 
